@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: employee_management
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./hr_backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      STORAGE_ROOT: /data/storage
+      GEMINI_API_KEYS: ${GEMINI_API_KEYS}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      GEMINI_CONCURRENCY: ${GEMINI_CONCURRENCY:-6}
+      FACE_MODEL: ${FACE_MODEL:-Facenet512}
+      FACE_DETECTOR: ${FACE_DETECTOR:-retinaface}
+      FACE_THRESHOLD: ${FACE_THRESHOLD:-0.4}
+      DEBUG: ${DEBUG:-false}
+    volumes:
+      - ./storage:/data/storage
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: ./hr_frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+
