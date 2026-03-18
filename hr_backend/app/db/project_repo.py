@@ -7,7 +7,7 @@ def list_projects(conn) -> list[dict]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT id, project_name, location, function, scale, start_date, end_date, status_id
+            SELECT id, project_name, location, function, scale, start_date, end_date, status_id, tree_data
             FROM projects
             ORDER BY id DESC
             """
@@ -21,7 +21,7 @@ def create_project(conn, data: dict) -> dict:
             """
             INSERT INTO projects (project_name, location, function, scale, start_date, end_date, status_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, project_name, location, function, scale, start_date, end_date, status_id
+            RETURNING id, project_name, location, function, scale, start_date, end_date, status_id, tree_data
             """,
             (
                 data.get("project_name"),
@@ -53,7 +53,7 @@ def update_project(conn, project_id: int, data: dict) -> dict:
         UPDATE projects
         SET {", ".join(fields)}
         WHERE id = %s
-        RETURNING id, project_name, location, function, scale, start_date, end_date, status_id
+        RETURNING id, project_name, location, function, scale, start_date, end_date, status_id, tree_data
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(q, tuple(values))
@@ -76,7 +76,7 @@ def get_project(conn, project_id: int) -> dict:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT id, project_name, location, function, scale, start_date, end_date, status_id
+            SELECT id, project_name, location, function, scale, start_date, end_date, status_id, tree_data
             FROM projects
             WHERE id = %s
             """,
@@ -165,4 +165,29 @@ def set_project_requirements(conn, project_id: int, document_type_ids: list[int]
                 (project_id, dt_id),
             )
     conn.commit()
+
+
+def add_project_members_batch(conn, project_id: int, members: list[dict]) -> None:
+    with conn.cursor() as cur:
+        for member in members:
+            cur.execute(
+                """
+                INSERT INTO project_employees (employee_id, project_id, role, start_date, end_date)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (employee_id, project_id) DO UPDATE SET
+                  role = EXCLUDED.role,
+                  start_date = EXCLUDED.start_date,
+                  end_date = EXCLUDED.end_date
+                """,
+                (member['employee_id'], project_id, member.get('role'), member.get('start_date'), member.get('end_date')),
+            )
+    conn.commit()
+
+
+def update_project_tree(conn, project_id: int, tree_data: Any) -> None:
+    import json
+    with conn.cursor() as cur:
+        cur.execute("UPDATE projects SET tree_data = %s WHERE id = %s", (json.dumps(tree_data) if tree_data else None, project_id))
+    conn.commit()
+
 

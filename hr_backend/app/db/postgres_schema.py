@@ -88,6 +88,13 @@ def init_schema(conn) -> None:
             """
         )
 
+        # Add tree_data column if it does not exist
+        cur.execute(
+            """
+            ALTER TABLE projects ADD COLUMN IF NOT EXISTS tree_data JSONB;
+            """
+        )
+
         # project_employees (M:N)
         cur.execute(
             """
