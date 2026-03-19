@@ -87,13 +87,13 @@ class HRService:
         dest_person_dir.mkdir(parents=True, exist_ok=True)
 
         display_name = person
-        meta_path = src_dir / _DISPLAY_NAME_FILE
-        try:
-            if meta_path.exists():
-                display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
-                meta_path.unlink()
-        except Exception:
-            pass
+        # meta_path = src_dir / _DISPLAY_NAME_FILE
+        # try:
+        #     if meta_path.exists():
+        #         display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
+        #         meta_path.unlink()
+        # except Exception:
+        #     pass
 
         emp = upsert_employee(
             db,
@@ -158,14 +158,15 @@ class HRService:
         dest_person_dir.mkdir(parents=True, exist_ok=True)
 
         display_name = final_person
-        if final_person == source_person:
-            meta_path = src_dir / _DISPLAY_NAME_FILE
-            try:
-                if meta_path.exists():
-                    display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
-                    meta_path.unlink()
-            except Exception:
-                pass
+        # if final_person == source_person:
+        #     meta_path = src_dir / _DISPLAY_NAME_FILE
+        #     try:
+        #         if meta_path.exists():
+        #             display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
+        #             meta_path.unlink()
+        #     except Exception:
+        #         pass
+        display_name = final_person
 
         emp = upsert_employee(
             db,
@@ -292,11 +293,11 @@ class HRService:
             folder_name = normalize_name(info.person_name) if info.person_name else UNKNOWN_FOLDER
             dest_dir = output_dir / folder_name
             dest_dir.mkdir(parents=True, exist_ok=True)
-            if info.person_name and folder_name != UNKNOWN_FOLDER:
-                try:
-                    (dest_dir / _DISPLAY_NAME_FILE).write_text(info.person_name, encoding="utf-8")
-                except Exception:
-                    pass
+            # if info.person_name and folder_name != UNKNOWN_FOLDER:
+            #     try:
+            #         (dest_dir / _DISPLAY_NAME_FILE).write_text(info.person_name, encoding="utf-8")
+            #     except Exception:
+            #         pass
 
             # dest = safe_destination(dest_dir, info.doc_type, file_path.suffix.lower())
             # SAU (đúng)
