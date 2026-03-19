@@ -50,7 +50,7 @@ def init_schema(conn) -> None:
             """
         )
 
-        # documents (subset used by this app)
+        # documents (subset used by this app)  Cần thêm trường version : int 1 / 2,3,4    mapping với DMS
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (
