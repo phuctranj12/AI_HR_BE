@@ -114,6 +114,19 @@ def rename_document(conn, employee_id: int, old_filename: str, new_filename: str
         )
     conn.commit()
 
+def rename_employee_documents_folder(conn, employee_id: int, old_folder: str, new_folder: str) -> None:
+    """Update file_path for all documents belonging to an employee when their root folder is renamed."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE documents
+            SET file_path = REGEXP_REPLACE(file_path, '^' || %s || '/', %s || '/')
+            WHERE employee_id = %s AND file_path LIKE %s || '/%%'
+            """,
+            (old_folder, new_folder, employee_id, old_folder)
+        )
+    conn.commit()
+
 def delete_employee_and_documents(conn, normalized_name: str, hard_delete: bool = False) -> bool:
     emp = get_employee_by_code(conn, normalized_name)
     if not emp:

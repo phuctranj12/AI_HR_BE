@@ -10,6 +10,7 @@ from app.db.postgres import (
     delete_employee_and_documents,
     delete_document,
     rename_document,
+    rename_employee_documents_folder,
     get_status_id_by_name,
 )
 
@@ -143,6 +144,56 @@ def delete_person_data(person: str, settings: SettingsDep, db: DbDep) -> dict:
         return {"deleted": person, "hard_deleted": hard_deleted}
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/{person}",
+    summary="Rename an entire person's folder",
+    status_code=status.HTTP_200_OK,
+)
+def rename_person_data_folder(person: str, body: dict, settings: SettingsDep, db: DbDep) -> dict:
+    new_name_raw: str = body.get("new_name", "").strip()
+    if not new_name_raw:
+        raise HTTPException(status_code=422, detail="new_name is required")
+        
+    from app.utils.name_normalizer import normalize_name
+    new_name = normalize_name(new_name_raw)
+
+    if new_name == person:
+        return {"renamed_to": new_name}
+
+    src = settings.people_dir / person
+    dst = settings.people_dir / new_name
+
+    if not src.exists() or not src.is_dir():
+        raise HTTPException(status_code=404, detail="Person folder not found")
+    if dst.exists():
+        raise HTTPException(status_code=409, detail="A folder with that name already exists")
+        
+    try:
+        src.resolve().relative_to(settings.people_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    emp = get_employee_by_code(db, person)
+    if emp:
+        if get_employee_by_code(db, new_name):
+            raise HTTPException(status_code=409, detail="Employee code already exists in database")
+
+    try:
+        src.rename(dst)
+        if emp:
+            from app.db.employee_repo import update_employee
+            update_employee(db, emp.id, {
+                "employee_code": new_name,
+                "folder_path": str(dst),
+                "full_name": new_name_raw
+            })
+            rename_employee_documents_folder(db, emp.id, person, new_name)
+            
+        return {"renamed_to": new_name}
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.delete(

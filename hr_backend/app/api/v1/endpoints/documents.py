@@ -283,6 +283,44 @@ def delete_person(person: str, settings: SettingsDep) -> dict:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
+@router.patch(
+    "/output/{person}",
+    summary="Rename an entire person's folder in staging",
+    status_code=status.HTTP_200_OK,
+)
+def rename_person(person: str, body: dict, settings: SettingsDep) -> dict:
+    new_name_raw: str = body.get("new_name", "").strip()
+    if not new_name_raw:
+        raise HTTPException(status_code=422, detail="new_name is required")
+        
+    from app.utils.name_normalizer import normalize_name
+    new_name = normalize_name(new_name_raw)
+
+    if new_name == person:
+        return {"renamed_to": new_name}
+
+    src = settings.output_dir / person
+    dst = settings.output_dir / new_name
+
+    if not src.exists() or not src.is_dir():
+        raise HTTPException(status_code=404, detail="Person folder not found")
+    if dst.exists():
+        raise HTTPException(status_code=409, detail="A folder with that name already exists")
+        
+    try:
+        src.resolve().relative_to(settings.output_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        src.rename(dst)
+        meta = dst / "_display_name.txt"
+        meta.write_text(new_name_raw, encoding="utf-8")
+        return {"renamed_to": new_name}
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get(
     "/output/{person}/download",
     summary="Download all files for a person as a ZIP archive",
