@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.db.postgres import connect, init_db
+from app.db.postgres import connect, create_pool, init_db
 
 
 @asynccontextmanager
@@ -18,12 +18,18 @@ async def lifespan(app: FastAPI):
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     settings.people_dir.mkdir(parents=True, exist_ok=True)
 
-    conn = connect(settings.database_url)
-    init_db(conn)
-    app.state.db = conn
+    pool = create_pool(settings.database_url)
+    conn = pool.getconn()
+    try:
+        init_db(conn)
+        conn.commit()
+    finally:
+        pool.putconn(conn)
+        
+    app.state.db_pool = pool
     yield
     try:
-        conn.close()
+        pool.closeall()
     except Exception:
         pass
 

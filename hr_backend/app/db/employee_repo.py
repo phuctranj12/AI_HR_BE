@@ -1,29 +1,38 @@
 from psycopg2.extras import RealDictCursor
 
 
-def list_employees(conn, q=None, limit: int = 50) -> list[dict]:
+def list_employees(conn, q=None, limit: int = 50, terminated: bool = False) -> list[dict]:
     q = (q or "").strip()
+    status_op = "=" if terminated else "!="
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT id FROM statuses WHERE status_name = 'Terminated'")
+        row = cur.fetchone()
+        terminated_id = row['id'] if row else -1
+        
+        status_cond = "status_id = %s" if terminated else "(status_id != %s OR status_id IS NULL)"
+        
         if q:
             cur.execute(
-                """
+                f"""
                 SELECT id, employee_code, full_name, department, position, phone, email, folder_path, created_at, updated_at
                 FROM employees
-                WHERE lower(full_name) LIKE lower(%s) OR lower(employee_code) LIKE lower(%s)
+                WHERE (lower(full_name) LIKE lower(%s) OR lower(employee_code) LIKE lower(%s))
+                  AND {status_cond}
                 ORDER BY updated_at DESC
                 LIMIT %s
                 """,
-                (f"%{q}%", f"%{q}%", limit),
+                (f"%{q}%", f"%{q}%", terminated_id, limit),
             )
         else:
             cur.execute(
-                """
+                f"""
                 SELECT id, employee_code, full_name, department, position, phone, email, folder_path, created_at, updated_at
                 FROM employees
+                WHERE {status_cond}
                 ORDER BY updated_at DESC
                 LIMIT %s
                 """,
-                (limit,),
+                (terminated_id, limit),
             )
         return list(cur.fetchall())
 
@@ -120,10 +129,31 @@ def update_employee(conn, employee_id: int, data: dict) -> dict:
     return dict(row)
 
 
-def delete_employee(conn, employee_id: int) -> None:
+def delete_employee(conn, employee_id: int, hard_delete: bool = False) -> bool:
+    """Returns True if a hard delete was performed, False if soft delete."""
     with conn.cursor() as cur:
+        cur.execute("SELECT id FROM statuses WHERE status_name = 'Terminated'")
+        row = cur.fetchone()
+        terminated_id = row[0] if row else None
+        
+        cur.execute("SELECT status_id FROM employees WHERE id = %s", (employee_id,))
+        emp_row = cur.fetchone()
+        if not emp_row:
+            raise KeyError("employee not found")
+        current_status_id = emp_row[0]
+        
+        if current_status_id != terminated_id and not hard_delete:
+            cur.execute("UPDATE employees SET status_id = %s WHERE id = %s", (terminated_id, employee_id))
+            conn.commit()
+            return False
+
+        # Hard delete
+        cur.execute("DELETE FROM project_employees WHERE employee_id = %s", (employee_id,))
+        cur.execute("DELETE FROM documents WHERE employee_id = %s", (employee_id,))
+        
         cur.execute("DELETE FROM employees WHERE id = %s", (employee_id,))
         if cur.rowcount == 0:
             raise KeyError("employee not found")
     conn.commit()
+    return True
 

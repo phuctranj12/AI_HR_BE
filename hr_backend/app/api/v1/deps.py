@@ -12,13 +12,29 @@ def get_hr_service(settings: Settings = Depends(get_settings)) -> HRService:
 
 
 def get_db(request: Request, settings: Settings = Depends(get_settings)) -> Any:
-    # Prefer the shared lifespan connection (normal server runtime).
-    conn = getattr(request.app.state, "db", None)
-    if conn is not None:
-        return conn
-
-    # Fallback for contexts where lifespan isn't running (tests/CLI).
-    return connect(settings.database_url)
+    # Prefer the pooled connection (normal server runtime).
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is not None:
+        conn = pool.getconn()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            pool.putconn(conn)
+    else:
+        # Fallback for contexts where lifespan isn't running (tests/CLI).
+        conn = connect(settings.database_url)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]

@@ -18,8 +18,9 @@ def get_employees(
     db: DbDep,
     q: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    terminated: bool = Query(default=False),
 ):
-    return {"employees": list_employees(db, q=q, limit=limit)}
+    return {"employees": list_employees(db, q=q, limit=limit, terminated=terminated)}
 
 
 @router.get("/{employee_id}", summary="Get an employee", response_model=EmployeeOut)
@@ -55,8 +56,8 @@ def patch_employee(employee_id: int, body: EmployeeUpdate, db: DbDep):
 @router.delete("/{employee_id}", summary="Delete employee", status_code=status.HTTP_200_OK)
 def del_employee(employee_id: int, db: DbDep) -> dict:
     try:
-        delete_employee(db, employee_id)
-        return {"deleted": employee_id}
+        hard_deleted = delete_employee(db, employee_id)
+        return {"deleted": employee_id, "hard_deleted": hard_deleted}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

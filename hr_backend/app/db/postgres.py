@@ -1,5 +1,6 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 from dataclasses import dataclass
 from typing import Optional
 
@@ -14,19 +15,30 @@ class Employee:
     folder_path: str
     created_at: str
     updated_at: str
+    status_id: Optional[int] = None
 
 def connect(database_url: str):
     ensure_database_exists(database_url)
     conn = psycopg2.connect(database_url)
     return conn
 
+def create_pool(database_url: str, minconn: int = 1, maxconn: int = 20) -> ThreadedConnectionPool:
+    ensure_database_exists(database_url)
+    return ThreadedConnectionPool(minconn, maxconn, database_url)
+
 def init_db(conn) -> None:
     init_schema(conn)
+
+def get_status_id_by_name(conn, status_name: str) -> Optional[int]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM statuses WHERE status_name = %s", (status_name,))
+        row = cur.fetchone()
+        return row[0] if row else None
 
 def get_employee_by_code(conn, employee_code: str) -> Optional[Employee]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            "SELECT id, employee_code, full_name, folder_path, created_at, updated_at FROM employees WHERE employee_code = %s",
+            "SELECT id, employee_code, full_name, folder_path, created_at, updated_at, status_id FROM employees WHERE employee_code = %s",
             (employee_code,),
         )
         row = cur.fetchone()
@@ -102,14 +114,28 @@ def rename_document(conn, employee_id: int, old_filename: str, new_filename: str
         )
     conn.commit()
 
-def delete_employee_and_documents(conn, normalized_name: str) -> None:
+def delete_employee_and_documents(conn, normalized_name: str, hard_delete: bool = False) -> bool:
     emp = get_employee_by_code(conn, normalized_name)
     if not emp:
-        return
+        return False
+        
+    terminated_id = get_status_id_by_name(conn, 'Terminated')
+    
     with conn.cursor() as cur:
+        cur.execute("SELECT status_id FROM employees WHERE id = %s", (emp.id,))
+        row = cur.fetchone()
+        current_status_id = row[0] if row else None
+        
+        if current_status_id != terminated_id and not hard_delete:
+            cur.execute("UPDATE employees SET status_id = %s WHERE id = %s", (terminated_id, emp.id))
+            conn.commit()
+            return False
+            
+        cur.execute("DELETE FROM project_employees WHERE employee_id = %s", (emp.id,))
         cur.execute("DELETE FROM documents WHERE employee_id = %s", (emp.id,))
         cur.execute("DELETE FROM employees WHERE id = %s", (emp.id,))
     conn.commit()
+    return True
 
 def clear_all_data(conn) -> None:
     # Not used by the current flow; kept for future use.

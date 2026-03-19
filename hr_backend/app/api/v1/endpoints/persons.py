@@ -10,6 +10,7 @@ from app.db.postgres import (
     delete_employee_and_documents,
     delete_document,
     rename_document,
+    get_status_id_by_name,
 )
 
 router = APIRouter(prefix="/persons", tags=["persons"])
@@ -35,13 +36,22 @@ def ensure_person_folder(body: dict, settings: SettingsDep) -> dict:
     summary="List all persons and their files in the people directory",
     response_model=OutputListResponse,
 )
-def list_persons(settings: SettingsDep, db: DbDep) -> OutputListResponse:
+def list_persons(settings: SettingsDep, db: DbDep, terminated: bool = False) -> OutputListResponse:
     try:
+        terminated_id = get_status_id_by_name(db, 'Terminated')
         persons: list[PersonFolder] = []
         for entry in sorted(settings.people_dir.iterdir()):
             if entry.is_dir():
                 display_name = None
                 emp = get_employee_by_code(db, entry.name)
+                current_status = emp.status_id if emp else None
+                is_terminated = current_status == terminated_id
+                
+                if terminated and not is_terminated:
+                    continue
+                if not terminated and is_terminated:
+                    continue
+
                 if emp:
                     display_name = emp.full_name
                 persons.append(
@@ -120,16 +130,17 @@ def serve_person_file(person: str, filename: str, settings: SettingsDep) -> File
 )
 def delete_person_data(person: str, settings: SettingsDep, db: DbDep) -> dict:
     folder = settings.people_dir / person
-    if not folder.exists() or not folder.is_dir():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    if folder.exists():
+        try:
+            folder.resolve().relative_to(settings.people_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+            
     try:
-        folder.resolve().relative_to(settings.people_dir.resolve())
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    try:
-        shutil.rmtree(folder)
-        delete_employee_and_documents(db, person)
-        return {"deleted": person}
+        hard_deleted = delete_employee_and_documents(db, person)
+        if hard_deleted and folder.exists() and folder.is_dir():
+            shutil.rmtree(folder)
+        return {"deleted": person, "hard_deleted": hard_deleted}
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 

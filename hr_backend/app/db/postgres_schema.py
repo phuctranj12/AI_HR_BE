@@ -69,6 +69,12 @@ def init_schema(conn) -> None:
             );
             """
         )
+        # Thêm cột version( phiên bản cho bảng documents )
+        cur.execute(
+            """
+            ALTER TABLE documents ADD COLUMN IF NOT EXISTS version INTEGER;
+            """
+        )
 
         # projects
         cur.execute(
@@ -148,7 +154,9 @@ def init_schema(conn) -> None:
             """
         )
 
-        # Seed statuses if empty
+        # Seed statuses if empty   trạng thái tuỳ chỉnh theo nhu cầu
+        # Hướng phát triển : tạo trạng thái ở giao diện để có thể thêm mới trạng thái
+        # tuỳ chọn trạng thái cho dự án , hồ sơ để note lại
         cur.execute("SELECT COUNT(*) FROM statuses;")
         (cnt,) = cur.fetchone()
         if cnt == 0:

@@ -74,3 +74,4 @@ dmypy.json
 # Database files
 *.sqlite3
 #storage
+.storage/
