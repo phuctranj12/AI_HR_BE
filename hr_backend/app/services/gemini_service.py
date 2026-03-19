@@ -66,6 +66,8 @@ class GeminiService:
             UnsupportedFileTypeError: file extension is not in SUPPORTED_MIME_TYPES.
             GeminiAnalysisError: Gemini call failed or returned unparseable JSON.
         """
+        import time
+
         suffix = file_path.suffix.lower()
         if suffix not in SUPPORTED_MIME_TYPES:
             raise UnsupportedFileTypeError(suffix)
@@ -74,22 +76,46 @@ class GeminiService:
         logger.debug("Uploading %s (%s) to Gemini…", file_path.name, mime)
 
         uploaded = genai.upload_file(str(file_path), mime_type=mime)
-        response = self._model.generate_content([_PROMPT, uploaded])
-        genai.delete_file(uploaded.name)
+        
+        try:
+            retries = 5
+            response = None
+            for attempt in range(retries):
+                try:
+                    response = self._model.generate_content([_PROMPT, uploaded])
+                    break
+                except Exception as e:
+                    error_str = str(e)
+                    if "429" in error_str or "Quota exceeded" in error_str:
+                        if attempt < retries - 1:
+                            m = re.search(r"Please retry in ([\d\.]+)s", error_str)
+                            delay = float(m.group(1)) + 1.0 if m else 15.0
+                            logger.warning(
+                                "Rate limit hit for %s. Retrying in %.2fs (attempt %d/%d)...",
+                                file_path.name, delay, attempt + 1, retries
+                            )
+                            time.sleep(delay)
+                            continue
+                    raise
+            
+            if not response:
+                raise GeminiAnalysisError(file_path.name, "Failed to get response after retries")
 
-        raw = response.text.strip()
-        raw = re.sub(r'^```[a-z]*\n?', '', raw)
-        raw = re.sub(r'\n?```$', '', raw)
+            raw = response.text.strip()
+            raw = re.sub(r'^```[a-z]*\n?', '', raw)
+            raw = re.sub(r'\n?```$', '', raw)
 
-        parsed = json.loads(raw)  # raises json.JSONDecodeError on bad response
-        if not isinstance(parsed, dict):
-            raise GeminiAnalysisError(file_path.name, "response is not a JSON object")
+            parsed = json.loads(raw)  # raises json.JSONDecodeError on bad response
+            if not isinstance(parsed, dict):
+                raise GeminiAnalysisError(file_path.name, "response is not a JSON object")
 
-        info = DocumentInfo.model_validate(parsed)
-        logger.info(
-            "Analyzed %s -> person=%s doc_type=%s",
-            file_path.name,
-            info.person_name,
-            info.doc_type,
-        )
-        return info
+            info = DocumentInfo.model_validate(parsed)
+            logger.info(
+                "Analyzed %s -> person=%s doc_type=%s",
+                file_path.name,
+                info.person_name,
+                info.doc_type,
+            )
+            return info
+        finally:
+            genai.delete_file(uploaded.name)

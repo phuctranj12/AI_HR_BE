@@ -55,7 +55,8 @@ class HRService:
 
         logger.info("Found %d file(s) to process", len(files))
 
-        sem = asyncio.Semaphore(max(1, int(self._settings.gemini_concurrency)))
+        # sem = asyncio.Semaphore(max(1, int(self._settings.gemini_concurrency)))
+        sem = asyncio.Semaphore(1)
 
         async def run_one(file_path: Path) -> FileProcessResult:
             async with sem:

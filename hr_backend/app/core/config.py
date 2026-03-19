@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
     gemini_api_keys: Optional[str] = None
     gemini_model: str = "gemini-2.0-flash"
-    gemini_concurrency: int = 4
+    gemini_concurrency: int = 1
 
     @property
     def get_api_keys(self) -> list[str]:
