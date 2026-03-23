@@ -33,7 +33,7 @@ if not hasattr(genai_client._client_manager.__class__, "__thread_local__"):
 _PROMPT = """Phân tích tài liệu này và trả về JSON (KHÔNG markdown, chỉ JSON thuần):
 {
   "person_name": "Họ tên đầy đủ của chủ nhân tài liệu (hoặc null nếu không xác định được)",
-  "doc_type": "một trong: CCCD | Bang_dai_hoc | Giay_kham_suc_khoe | Anh_the | Ly_lich | Khac"
+  "doc_type": "Phân loại. Ưu tiên dùng: Anh_the, Cccd, Bang_tot_nghiep, Giay_kham_sk, The_an_toan_ld, Qd_an_toan_ld, Hop_dong_thu_viec, Hop_dong_lao_dong, Cv_kinh_nghiem. Nếu tài liệu không thuộc các loại này, hãy tự đặt tên loại tài liệu mới (ngắn gọn, viết không dấu và dùng gạch dưới, ví dụ: Don_xin_nghi)."
 }"""
 
 _api_keys_pool = None

@@ -259,3 +259,68 @@ def rename_person_file(person: str, filename: str, body: dict, settings: Setting
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
+@router.post(
+    "/download-batch",
+    summary="Download multiple persons' folders as a single ZIP archive",
+)
+def download_persons_batch(body: dict, settings: SettingsDep) -> FileResponse:
+    import tempfile
+    import shutil
+    from pathlib import Path
+
+    persons: list[str] = body.get("persons", [])
+    if not persons:
+        persons = [entry.name for entry in settings.people_dir.iterdir() if entry.is_dir()]
+        
+    if not persons:
+        raise HTTPException(status_code=404, detail="No persons found to download")
+
+    temp_dir = Path(tempfile.mkdtemp())
+    try:
+        for person in persons:
+            src = settings.people_dir / person
+            if src.exists() and src.is_dir():
+                try:
+                    src.resolve().relative_to(settings.people_dir.resolve())
+                    dst = temp_dir / person
+                    shutil.copytree(src, dst)
+                except Exception:
+                    continue
+
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+        temp_zip.close()
+        shutil.make_archive(temp_zip.name.replace(".zip", ""), 'zip', temp_dir)
+        
+        return FileResponse(
+            path=f"{temp_zip.name}",
+            media_type="application/zip",
+            filename="Ho_so_nhan_su_batch.zip"
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@router.post(
+    "/delete-batch",
+    summary="Delete multiple persons' folders in bulk",
+    status_code=status.HTTP_200_OK,
+)
+def delete_persons_batch(body: dict, settings: SettingsDep, db: DbDep) -> dict:
+    persons: list[str] = body.get("persons", [])
+    if not persons:
+        persons = [entry.name for entry in settings.people_dir.iterdir() if entry.is_dir()]
+
+    deleted_count = 0
+    for person in persons:
+        folder = settings.people_dir / person
+        if folder.exists() and folder.is_dir():
+            try:
+                folder.resolve().relative_to(settings.people_dir.resolve())
+                hard_deleted = delete_employee_and_documents(db, person)
+                if hard_deleted:
+                    shutil.rmtree(folder)
+                deleted_count += 1
+            except Exception:
+                continue
+
+    return {"deleted_count": deleted_count}
