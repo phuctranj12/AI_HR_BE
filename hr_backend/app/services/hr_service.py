@@ -5,19 +5,19 @@ import concurrent.futures
 from pathlib import Path
 from typing import Any
 
-from app.core.config import Settings
-from app.models.document import SUPPORTED_MIME_TYPES, UNKNOWN_FOLDER
-from app.schemas.hr import (
+from hr_backend.app.core.config import Settings
+from hr_backend.app.models.document import SUPPORTED_MIME_TYPES, UNKNOWN_FOLDER
+from hr_backend.app.schemas.hr import (
     FaceMatchResult,
     FileProcessResult,
     MatchFacesResponse,
     ProcessDocumentsResponse,
 )
-from app.services.face_service import FaceService
-from app.services.gemini_service import GeminiService
-from app.utils.file_utils import copy_to_output, move_to_output, safe_destination
-from app.utils.name_normalizer import normalize_name
-from app.db.postgres import insert_document, upsert_employee
+from hr_backend.app.services.face_service import FaceService
+from hr_backend.app.services.gemini_service import GeminiService
+from hr_backend.app.utils.file_utils import copy_to_output, move_to_output, safe_destination
+from hr_backend.app.utils.name_normalizer import normalize_name
+from hr_backend.app.db.postgres import insert_document, upsert_employee
 
 logger = logging.getLogger(__name__)
 

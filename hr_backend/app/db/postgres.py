@@ -51,16 +51,20 @@ def upsert_employee(
     full_name: str,
     folder_path: str,
 ) -> Employee:
+    # Get active status ID
+    active_id = get_status_id_by_name(conn, 'Active')
+    
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO employees (employee_code, full_name, folder_path)
-            VALUES (%s, %s, %s)
+            INSERT INTO employees (employee_code, full_name, folder_path, status_id)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (employee_code) DO UPDATE SET
               full_name = EXCLUDED.full_name,
-              folder_path = EXCLUDED.folder_path
+              folder_path = EXCLUDED.folder_path,
+              status_id = EXCLUDED.status_id
             """,
-            (employee_code, full_name, folder_path),
+            (employee_code, full_name, folder_path, active_id),
         )
     conn.commit()
     emp = get_employee_by_code(conn, employee_code)

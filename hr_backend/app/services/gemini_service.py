@@ -8,10 +8,10 @@ from pathlib import Path
 import google.generativeai as genai
 from google.generativeai import client as genai_client
 
-from app.core.config import Settings
-from app.core.exceptions import GeminiAnalysisError, UnsupportedFileTypeError
-from app.models.document import SUPPORTED_MIME_TYPES
-from app.schemas.hr import DocumentInfo
+from hr_backend.app.core.config import Settings
+from hr_backend.app.core.exceptions import GeminiAnalysisError, UnsupportedFileTypeError
+from hr_backend.app.models.document import SUPPORTED_MIME_TYPES
+from hr_backend.app.schemas.hr import DocumentInfo
 
 logger = logging.getLogger(__name__)
 
@@ -119,3 +119,41 @@ class GeminiService:
             return info
         finally:
             genai.delete_file(uploaded.name)
+if __name__ == "__main__":
+    from pathlib import Path
+
+    TEST_DIR = Path(r"/Users/anhphuc/Desktop/git_AI_HR/AI_HR_BE/hr_backend/storage/input")  # Thay đường dẫn này
+    API_KEY = "AIzaSyDLyrhSK4hYnH1tA8k2b9PMKx7LYZnvPY4"  # Thay key này
+
+
+    class MockSettings:
+        gemini_model = "gemini-2.0-flash"
+        get_api_keys = [API_KEY]
+
+
+    service = GeminiService(MockSettings())
+
+    for file_path in TEST_DIR.glob("*"):
+        if file_path.is_file():
+            try:
+                print(f"\n{'=' * 60}")
+                print(f"FILE: {file_path.name}")
+                print('=' * 60)
+
+                # Gọi Gemini và lấy raw response
+                suffix = file_path.suffix.lower()
+                mime = SUPPORTED_MIME_TYPES.get(suffix)
+                if not mime:
+                    continue
+
+                uploaded = genai.upload_file(str(file_path), mime_type=mime)
+                response = service._model.generate_content([_PROMPT, uploaded])
+
+                print("RAW RESPONSE:")
+                print(response.text)
+                print()
+
+                genai.delete_file(uploaded.name)
+
+            except Exception as e:
+                print(f"ERROR: {e}")

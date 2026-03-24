@@ -7,8 +7,8 @@ import numpy as np
 import pymupdf
 from deepface import DeepFace
 
-from app.core.config import Settings
-from app.core.exceptions import FaceEmbeddingError, NoAnchorsError
+from hr_backend.app.core.config import Settings
+from hr_backend.app.core.exceptions import FaceEmbeddingError, NoAnchorsError
 
 logger = logging.getLogger(__name__)
 
