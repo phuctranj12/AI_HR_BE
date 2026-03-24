@@ -1,3 +1,4 @@
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from hr_backend.app.api.v1.router import router as api_v1_router
 from hr_backend.app.core.config import get_settings
 from hr_backend.app.core.logging import configure_logging
-from hr_backend.app.db.postgres import connect, create_pool, init_db
+from hr_backend.app.db.postgres import connect, create_pool, init_d
 
 
 @asynccontextmanager
@@ -25,7 +26,7 @@ async def lifespan(app: FastAPI):
         conn.commit()
     finally:
         pool.putconn(conn)
-        
+
     app.state.db_pool = pool
     yield
     try:
