@@ -104,6 +104,8 @@ def download_person(person: str, settings: SettingsDep) -> FileResponse:
     summary="Serve a single file from the people directory for preview",
 )
 def serve_person_file(person: str, filename: str, settings: SettingsDep) -> FileResponse:
+    from urllib.parse import quote
+
     file_path = settings.people_dir / person / filename
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -116,11 +118,18 @@ def serve_person_file(person: str, filename: str, settings: SettingsDep) -> File
     # Reuse _MIME_MAP or default
     _MIME_MAP = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
     media_type = _MIME_MAP.get(file_path.suffix.lower(), "application/octet-stream")
+
+    # ✅ FIX: Encode filename properly for unicode characters
+    # Use RFC 5987 encoding for Content-Disposition header
+    encoded_filename = quote(filename.encode('utf-8'))
+
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
         filename=filename,
-        headers={"Content-Disposition": f"inline; filename=\"{filename}\""},
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
+        },
     )
 
 

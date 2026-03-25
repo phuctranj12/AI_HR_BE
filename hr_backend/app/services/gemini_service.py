@@ -16,12 +16,12 @@ from app.schemas.hr import DocumentInfo
 logger = logging.getLogger(__name__)
 
 # Monkey-patch google.generativeai client manager to be thread-local
-# This ensures that each thread getting its own client config via genai.configure() 
+# This ensures that each thread getting its own client config via genai.configure()
 # does not overwrite configs of other threads.
 if not hasattr(genai_client._client_manager.__class__, "__thread_local__"):
     class ThreadLocalClientManager(threading.local, type(genai_client._client_manager)):
         __thread_local__ = True
-        
+
         def __init__(self):
             super().__init__()
             self.client_config = {}
@@ -30,12 +30,31 @@ if not hasattr(genai_client._client_manager.__class__, "__thread_local__"):
 
     genai_client._client_manager = ThreadLocalClientManager()
 
-_PROMPT = """Phân tích tài liệu này và trả về JSON (KHÔNG markdown, chỉ JSON thuần):
-{
-  "person_name": "Họ tên đầy đủ của chủ nhân tài liệu (hoặc null nếu không xác định được)",
-  "doc_type": "Phân loại. Ưu tiên dùng: Anh_the, Cccd, Bang_tot_nghiep, Giay_kham_sk, The_an_toan_ld, Qd_an_toan_ld, Hop_dong_thu_viec, Hop_dong_lao_dong, Cv_kinh_nghiem. Nếu tài liệu không thuộc các loại này, hãy tự đặt tên loại tài liệu mới (ngắn gọn, viết không dấu và dùng gạch dưới, ví dụ: Don_xin_nghi)."
-}"""
+_PROMPT = """
+Bạn là một chuyên viên kiểm tra tài liệu hồ sơ.
+Nhiệm vụ của bạn là đọc hồ sơ được đưa vào và trả về tên người sở hữu kèm loại hồ sơ.
 
+Các loại hồ sơ trả ra:
+- Căn cước công dân
+- Bằng tốt nghiệp
+- Giấy khám sức khỏe
+- Thẻ an toàn lao động
+- Quyết định an toàn lao động
+- Hợp đồng thử việc
+- Hợp đồng lao đông
+- CV kinh nghiệm
+- Khác
+
+Nếu file chứa NHIỀU hồ sơ của NHIỀU người, chỉ lấy hồ sơ chính/đầu tiên.
+
+Đầu ra trả về là một JSON object với định dạng:
+{
+  "person_name": "Tên đầy đủ tiếng Việt có dấu người sở hữu. Ví dụ: Nguyễn Văn A",
+  "doc_type": "Một trong những loại tài liệu/hồ sơ được quy định bên trên"
+}
+
+CHỈ TRẢ VỀ JSON OBJECT DUY NHẤT, TUYỆT ĐỐI KHÔNG TRẢ VỀ ARRAY, KHÔNG VIẾT HAY GIẢI THÍCH GÌ THÊM.
+"""
 _api_keys_pool = None
 _api_keys_lock = threading.Lock()
 
@@ -43,18 +62,18 @@ _api_keys_lock = threading.Lock()
 class GeminiService:
     def __init__(self, settings: Settings) -> None:
         global _api_keys_pool
-        
+
         with _api_keys_lock:
             if _api_keys_pool is None:
                 keys = settings.get_api_keys
                 logger.info("Initializing Gemini API keys pool with %d keys", len(keys))
                 _api_keys_pool = itertools.cycle(keys)
-            
+
             api_key = next(_api_keys_pool)
-            
+
         genai.configure(api_key=api_key)
         self._model = genai.GenerativeModel(settings.gemini_model)
-        
+
         # Log partial key for tracing without exposing the full key
         safe_key = f"...{api_key[-4:]}" if len(api_key) >= 4 else "***"
         logger.info("GeminiService initialized with model=%s using api_key=%s", settings.gemini_model, safe_key)
@@ -76,7 +95,7 @@ class GeminiService:
         logger.debug("Uploading %s (%s) to Gemini…", file_path.name, mime)
 
         uploaded = genai.upload_file(str(file_path), mime_type=mime)
-        
+
         try:
             retries = 5
             response = None
@@ -97,7 +116,7 @@ class GeminiService:
                             time.sleep(delay)
                             continue
                     raise
-            
+
             if not response:
                 raise GeminiAnalysisError(file_path.name, "Failed to get response after retries")
 
@@ -123,7 +142,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     TEST_DIR = Path(r"/Users/anhphuc/Desktop/git_AI_HR/AI_HR_BE/hr_backend/storage/input")  # Thay đường dẫn này
-    API_KEY = "AIzaSyDLyrhSK4hYnH1tA8k2b9PMKx7LYZnvPY4"  # Thay key này
+    API_KEY = ""  # Thay key này
 
 
     class MockSettings:
