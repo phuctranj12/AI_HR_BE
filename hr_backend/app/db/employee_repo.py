@@ -1,9 +1,10 @@
 from psycopg2.extras import RealDictCursor
 
 
-def list_employees(conn, q=None, limit: int = 50, terminated: bool = False) -> list[dict]:
+def list_employees(conn, q=None, page: int = 1, size: int = 50, terminated: bool = False) -> tuple[int, list[dict]]:
     q = (q or "").strip()
     status_op = "=" if terminated else "!="
+    offset = (page - 1) * size
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("SELECT id FROM statuses WHERE status_name = 'Terminated'")
         row = cur.fetchone()
@@ -14,27 +15,48 @@ def list_employees(conn, q=None, limit: int = 50, terminated: bool = False) -> l
         if q:
             cur.execute(
                 f"""
+                SELECT count(*) as total
+                FROM employees
+                WHERE (lower(full_name) LIKE lower(%s) OR lower(employee_code) LIKE lower(%s))
+                  AND {status_cond}
+                """,
+                (f"%{q}%", f"%{q}%", terminated_id),
+            )
+            total = cur.fetchone()["total"]
+            
+            cur.execute(
+                f"""
                 SELECT id, employee_code, full_name, department, position, phone, email, folder_path, created_at, updated_at
                 FROM employees
                 WHERE (lower(full_name) LIKE lower(%s) OR lower(employee_code) LIKE lower(%s))
                   AND {status_cond}
                 ORDER BY updated_at DESC
-                LIMIT %s
+                LIMIT %s OFFSET %s
                 """,
-                (f"%{q}%", f"%{q}%", terminated_id, limit),
+                (f"%{q}%", f"%{q}%", terminated_id, size, offset),
             )
         else:
+            cur.execute(
+                f"""
+                SELECT count(*) as total
+                FROM employees
+                WHERE {status_cond}
+                """,
+                (terminated_id,),
+            )
+            total = cur.fetchone()["total"]
+
             cur.execute(
                 f"""
                 SELECT id, employee_code, full_name, department, position, phone, email, folder_path, created_at, updated_at
                 FROM employees
                 WHERE {status_cond}
                 ORDER BY updated_at DESC
-                LIMIT %s
+                LIMIT %s OFFSET %s
                 """,
-                (terminated_id, limit),
+                (terminated_id, size, offset),
             )
-        return list(cur.fetchall())
+        return total, list(cur.fetchall())
 
 
 def get_employee(conn, employee_id: int) -> dict:

@@ -16,6 +16,16 @@ class Employee:
     created_at: str
     updated_at: str
     status_id: Optional[int] = None
+    date_of_birth: Optional[str] = None
+    hometown: Optional[str] = None
+    join_date: Optional[str] = None
+    department: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    permanent_address: Optional[str] = None
+    position: Optional[str] = None
+    file_path: Optional[str] = None
+    notes: Optional[str] = None
 
 def connect(database_url: str):
     ensure_database_exists(database_url)
@@ -38,7 +48,13 @@ def get_status_id_by_name(conn, status_name: str) -> Optional[int]:
 def get_employee_by_code(conn, employee_code: str) -> Optional[Employee]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            "SELECT id, employee_code, full_name, folder_path, created_at, updated_at, status_id FROM employees WHERE employee_code = %s",
+            """
+            SELECT 
+                id, employee_code, full_name, folder_path, created_at, updated_at, status_id,
+                date_of_birth::text, hometown, join_date::text, department, phone, email, 
+                permanent_address, position, file_path, notes
+            FROM employees WHERE employee_code = %s
+            """,
             (employee_code,),
         )
         row = cur.fetchone()
@@ -50,6 +66,14 @@ def upsert_employee(
     employee_code: str,
     full_name: str,
     folder_path: str,
+    date_of_birth: Optional[str] = None,
+    hometown: Optional[str] = None,
+    join_date: Optional[str] = None,
+    department: Optional[str] = None,
+    phone: Optional[str] = None,
+    email: Optional[str] = None,
+    permanent_address: Optional[str] = None,
+    position: Optional[str] = None,
 ) -> Employee:
     # Get active status ID
     active_id = get_status_id_by_name(conn, 'Active')
@@ -57,14 +81,30 @@ def upsert_employee(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO employees (employee_code, full_name, folder_path, status_id)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO employees (
+                employee_code, full_name, folder_path, status_id,
+                date_of_birth, hometown, join_date, department,
+                phone, email, permanent_address, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (employee_code) DO UPDATE SET
-              full_name = EXCLUDED.full_name,
+              full_name = COALESCE(EXCLUDED.full_name, employees.full_name),
               folder_path = EXCLUDED.folder_path,
-              status_id = EXCLUDED.status_id
+              status_id = EXCLUDED.status_id,
+              date_of_birth = COALESCE(EXCLUDED.date_of_birth, employees.date_of_birth),
+              hometown = COALESCE(EXCLUDED.hometown, employees.hometown),
+              join_date = COALESCE(EXCLUDED.join_date, employees.join_date),
+              department = COALESCE(EXCLUDED.department, employees.department),
+              phone = COALESCE(EXCLUDED.phone, employees.phone),
+              email = COALESCE(EXCLUDED.email, employees.email),
+              permanent_address = COALESCE(EXCLUDED.permanent_address, employees.permanent_address),
+              position = COALESCE(EXCLUDED.position, employees.position)
             """,
-            (employee_code, full_name, folder_path, active_id),
+            (
+                employee_code, full_name, folder_path, active_id,
+                date_of_birth, hometown, join_date, department,
+                phone, email, permanent_address, position
+            ),
         )
     conn.commit()
     emp = get_employee_by_code(conn, employee_code)
@@ -78,6 +118,11 @@ def insert_document(
     doc_type: str,
     filename: str,
     rel_path: str,
+    issued_date: Optional[str] = None,
+    issued_by: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    document_number: Optional[str] = None,
 ) -> None:
     with conn.cursor() as cur:
         # ensure doc_type exists in document_types
@@ -91,10 +136,13 @@ def insert_document(
 
         cur.execute(
             """
-            INSERT INTO documents (employee_id, document_type_id, document_name, file_path)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO documents (
+                employee_id, document_type_id, document_name, file_path,
+                issued_date, issued_by, start_date, end_date, document_number
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (employee_id, doc_type_id, filename, rel_path),
+            (employee_id, doc_type_id, filename, rel_path, issued_date, issued_by, start_date, end_date, document_number),
         )
     conn.commit()
 

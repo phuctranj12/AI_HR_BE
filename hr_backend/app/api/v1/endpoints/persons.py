@@ -70,6 +70,63 @@ def list_persons(settings: SettingsDep, db: DbDep, terminated: bool = False) -> 
         ) from exc
 
 
+from pydantic import BaseModel
+from typing import Optional
+
+class SearchFolderRequest(BaseModel):
+    name: Optional[str] = None
+    cccd: Optional[str] = None
+    mnv: Optional[str] = None
+
+@router.post(
+    "/search-folders",
+    summary="Search person folders by Name, CCCD, or MNV",
+    response_model=OutputListResponse,
+)
+def search_folders(body: SearchFolderRequest, settings: SettingsDep, db: DbDep) -> OutputListResponse:
+    from psycopg2.extras import RealDictCursor
+    from pathlib import Path
+    
+    query = """
+        SELECT DISTINCT e.folder_path, e.full_name
+        FROM employees e
+        LEFT JOIN documents d ON e.id = d.employee_id
+        WHERE 1=1
+    """
+    params = []
+    
+    if body.name:
+        query += " AND e.full_name ILIKE %s"
+        params.append(f"%{body.name}%")
+    if body.mnv:
+        query += " AND e.employee_code = %s"
+        params.append(body.mnv)
+    if body.cccd:
+        query += " AND (e.employee_code = %s OR d.document_number = %s)"
+        params.extend([body.cccd, body.cccd])
+        
+    with db.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        
+    persons: list[PersonFolder] = []
+    for row in rows:
+        folder_path = row["folder_path"]
+        if folder_path:
+            folder_name = Path(folder_path).name
+            entry = settings.people_dir / folder_name
+            if entry.exists() and entry.is_dir():
+                persons.append(
+                    PersonFolder(
+                        name=entry.name,
+                        display_name=row["full_name"],
+                        files=sorted(f.name for f in entry.iterdir() if f.is_file()),
+                    )
+                )
+                
+    return OutputListResponse(persons=persons)
+
+
 @router.get(
     "/{person}/download",
     summary="Download all files for a person as a ZIP archive",

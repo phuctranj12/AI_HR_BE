@@ -11,6 +11,24 @@ from app.models.document import DocType
 class DocumentInfo(BaseModel):
     person_name: Optional[str] = Field(None, description="Full name of the document owner")
     doc_type: str = Field("Khac", description="Classified document type")
+    
+    # Newly extracted employee fields
+    employee_code: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    hometown: Optional[str] = None
+    join_date: Optional[str] = None
+    department: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    permanent_address: Optional[str] = None
+    position: Optional[str] = None
+    
+    # Newly extracted document fields
+    issued_date: Optional[str] = None
+    issued_by: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    document_number: Optional[str] = None
 
 
 # ── Processing results ───────────────────────────────────────────────────────

@@ -31,29 +31,45 @@ if not hasattr(genai_client._client_manager.__class__, "__thread_local__"):
     genai_client._client_manager = ThreadLocalClientManager()
 
 _PROMPT = """
-Bạn là một chuyên viên kiểm tra tài liệu hồ sơ.
-Nhiệm vụ của bạn là đọc hồ sơ được đưa vào và trả về tên người sở hữu kèm loại hồ sơ.
+Bạn là một chuyên viên kiểm tra tài liệu hồ sơ nhân sự.
+Nhiệm vụ của bạn là phân tích file tài liệu được đưa vào và trích xuất các thông tin chi tiết.
+Rất quan trọng: Nếu bất kỳ trường thông tin nào không thể tìm thấy hoặc không có trong tài liệu, MẶC ĐỊNH trả về null (tuyệt đối không được tự bịa ra).
 
-Các loại hồ sơ trả ra:
+Các loại hồ sơ (doc_type) hợp lệ:
 - Căn cước công dân
 - Bằng tốt nghiệp
 - Giấy khám sức khỏe
 - Thẻ an toàn lao động
 - Quyết định an toàn lao động
 - Hợp đồng thử việc
-- Hợp đồng lao đông
+- Hợp đồng lao động
 - CV kinh nghiệm
+- Sơ yếu lý lịch
 - Khác
 
 Nếu file chứa NHIỀU hồ sơ của NHIỀU người, chỉ lấy hồ sơ chính/đầu tiên.
 
-Đầu ra trả về là một JSON object với định dạng:
+Đầu ra trả về CHỈ LÀ một JSON object định dạng dưới đây:
 {
-  "person_name": "Tên đầy đủ tiếng Việt có dấu người sở hữu. Ví dụ: Nguyễn Văn A",
-  "doc_type": "Một trong những loại tài liệu/hồ sơ được quy định bên trên"
+  "person_name": "Tên đầy đủ tiếng Việt có dấu. VD: Nguyễn Văn A",
+  "doc_type": "Một trong những loại hồ sơ hợp lệ. VD: Căn cước công dân",
+  "employee_code": "Mã nhân viên, mã thẻ, hoặc số CCCD/CMND nếu là thẻ căn cước",
+  "date_of_birth": "Ngày sinh (Định dạng YYYY-MM-DD)",
+  "hometown": "Quê quán hoặc nơi sinh",
+  "join_date": "Ngày bắt đầu làm việc/thử việc (Định dạng YYYY-MM-DD)",
+  "department": "Phòng ban công tác",
+  "phone": "Số điện thoại",
+  "email": "Địa chỉ email",
+  "permanent_address": "Địa chỉ thường trú",
+  "position": "Chức vụ (VD: Nhân viên, Phó phòng)",
+  "issued_date": "Ngày cấp tài liệu (Định dạng YYYY-MM-DD)",
+  "issued_by": "Nơi cấp tài liệu (VD: Cục CS QLHC về TTXH)",
+  "start_date": "Ngày bắt đầu hiệu lực (Định dạng YYYY-MM-DD)",
+  "end_date": "Ngày hết hạn (Định dạng YYYY-MM-DD)",
+  "document_number": "Số hiệu hợp đồng, bằng cấp, số hồ sơ..."
 }
 
-CHỈ TRẢ VỀ JSON OBJECT DUY NHẤT, TUYỆT ĐỐI KHÔNG TRẢ VỀ ARRAY, KHÔNG VIẾT HAY GIẢI THÍCH GÌ THÊM.
+CHỈ TRẢ VỀ JSON OBJECT DUY NHẤT, TUYỆT ĐỐI KHÔNG TRẢ VỀ ARRAY, KHÔNG VIẾT HAY GIẢI THÍCH GÌ THÊM. KHÔNG VIẾT TRONG KHỐI MARKDOWN.
 """
 _api_keys_pool = None
 _api_keys_lock = threading.Lock()

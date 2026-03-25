@@ -17,10 +17,12 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 def get_employees(
     db: DbDep,
     q: Optional[str] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=50, ge=1, le=200),
     terminated: bool = Query(default=False),
 ):
-    return {"employees": list_employees(db, q=q, limit=limit, terminated=terminated)}
+    total, employees = list_employees(db, q=q, page=page, size=size, terminated=terminated)
+    return {"total": total, "employees": employees}
 
 
 @router.get("/{employee_id}", summary="Get an employee", response_model=EmployeeOut)

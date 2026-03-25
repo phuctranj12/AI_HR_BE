@@ -56,7 +56,7 @@ async def upload_documents(
 
 @router.post(
     "/process",
-    summary="Classify all documents in the input directory using Gemini AI",
+    summary="Classify all documents in the input directory using LLM",
     response_model=ProcessDocumentsResponse,
 )
 async def process_documents(hr: HRServiceDep) -> ProcessDocumentsResponse:
@@ -263,6 +263,122 @@ def rename_output_file(person: str, filename: str, body: dict, settings: Setting
         return {"renamed_to": new_name}
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/{doc_id}/file",
+    summary="Upload a new file to replace an existing document, re-running AI extraction",
+)
+async def replace_document_file(
+    doc_id: int,
+    file: UploadFile,
+    settings: SettingsDep,
+    hr: HRServiceDep,
+    db: DbDep
+) -> dict:
+    from psycopg2.extras import RealDictCursor
+    from app.services.gemini_service import GeminiService
+    import json
+
+    # 1. Verify document exists
+    with db.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT d.id, d.document_name, d.file_path, d.employee_id, e.folder_path, e.full_name
+            FROM documents d
+            JOIN employees e ON d.employee_id = e.id
+            WHERE d.id = %s
+            """,
+            (doc_id,)
+        )
+        old_doc = cur.fetchone()
+    
+    if not old_doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    employee_folder = old_doc["folder_path"]
+    
+    # 2. Save uploaded file to temp input dir
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in SUPPORTED_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+
+    temp_path = settings.input_dir / f"temp_update_{doc_id}{suffix}"
+    content = await file.read()
+    temp_path.write_bytes(content)
+
+    # 3. Analyze with Gemini
+    try:
+        info = GeminiService(settings).analyze_document(temp_path)
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"AI extraction failed: {exc}")
+
+    # 4. Move to target folder
+    import app.utils.file_utils as futils
+    person_dir = Path(employee_folder)
+    
+    doc_type_str = info.doc_type.value if hasattr(info.doc_type, "value") else str(info.doc_type)
+    if doc_type_str.startswith("DocType."):
+        doc_type_str = doc_type_str.replace("DocType.", "")
+        
+    doc_type_upper = doc_type_str.upper()
+    from app.services.hr_service import display_name_to_folder
+    final_base = f"{display_name_to_folder(old_doc['full_name'])}_{doc_type_upper}"
+    dest = futils.safe_destination(person_dir, final_base, suffix)
+    
+    futils.move_to_output(temp_path, dest)
+
+    # 5. Extract metadata and update db
+    meta_json = info.model_dump()
+    
+    with db.cursor() as cur:
+        # Get or create document_type_id
+        cur.execute("SELECT id FROM document_types WHERE type_name = %s", (doc_type_upper,))
+        dt_row = cur.fetchone()
+        if dt_row:
+            dt_id = dt_row[0]
+        else:
+            cur.execute("INSERT INTO document_types (type_name) VALUES (%s) RETURNING id", (doc_type_upper,))
+            dt_id = cur.fetchone()[0]
+            
+        rel_path = str(dest.relative_to(settings.people_dir))
+        
+        cur.execute(
+            """
+            UPDATE documents SET 
+                document_type_id = %s,
+                document_name = %s,
+                file_path = %s,
+                issued_date = %s,
+                issued_by = %s,
+                start_date = %s,
+                end_date = %s,
+                document_number = %s
+            WHERE id = %s
+            """,
+            (
+                dt_id, dest.name, rel_path,
+                meta_json.get("issued_date"), meta_json.get("issued_by"),
+                meta_json.get("start_date"), meta_json.get("end_date"),
+                meta_json.get("document_number"), doc_id
+            )
+        )
+        
+        # Also optionally delete the old file
+        old_file = settings.people_dir / old_doc["file_path"]
+        if old_file.exists() and old_file != dest:
+            old_file.unlink(missing_ok=True)
+            
+    db.commit()
+    
+    return {
+        "status": "success",
+        "doc_id": doc_id,
+        "new_filename": dest.name,
+        "doc_type": doc_type_upper,
+        "meta": meta_json
+    }
 @router.delete(
     "/output/{person}",
     summary="Delete an entire person's folder",

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import catalog, documents, employees, faces, health, persons, projects
+from app.api.v1.endpoints import catalog, documents, employees, faces, health, persons, projects, notifications
 
 router = APIRouter(prefix="/api/v1")
 
@@ -11,4 +11,5 @@ router.include_router(employees.router)
 router.include_router(faces.router)
 router.include_router(persons.router)
 router.include_router(projects.router)
+router.include_router(notifications.router)
 

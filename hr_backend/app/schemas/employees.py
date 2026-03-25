@@ -45,4 +45,5 @@ class EmployeeOut(EmployeeBase):
 
 
 class EmployeeList(BaseModel):
+    total: int
     employees: list[EmployeeOut]

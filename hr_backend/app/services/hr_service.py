@@ -99,15 +99,35 @@ class HRService:
         # except Exception:
         #     pass
 
+        import json
+        emp_meta = {}
+        for f in src_dir.iterdir():
+            if f.is_file() and f.name.endswith(".meta.json"):
+                try:
+                    data = json.loads(f.read_text(encoding="utf-8"))
+                    for k, v in data.items():
+                        if v is not None and k not in ("person_name", "doc_type"):
+                            emp_meta[k] = v
+                except Exception:
+                    pass
+
         emp = upsert_employee(
             db,
-            employee_code=person_folder,
+            employee_code=emp_meta.get("employee_code") or person_folder,
             full_name=display_name,
             folder_path=str(dest_person_dir),
+            date_of_birth=emp_meta.get("date_of_birth"),
+            hometown=emp_meta.get("hometown"),
+            join_date=emp_meta.get("join_date"),
+            department=emp_meta.get("department"),
+            phone=emp_meta.get("phone"),
+            email=emp_meta.get("email"),
+            permanent_address=emp_meta.get("permanent_address"),
+            position=emp_meta.get("position"),
         )
 
         moved: list[dict] = []
-        for f in sorted(p for p in src_dir.iterdir() if p.is_file() and p.name != _DISPLAY_NAME_FILE):
+        for f in sorted(p for p in src_dir.iterdir() if p.is_file() and not p.name.endswith(".meta.json") and p.name != _DISPLAY_NAME_FILE):
             suffix = f.suffix.lower()
             base = f.stem
             # base might be "CCCD" or "CCCD_2" etc. Strip trailing _N.
@@ -121,6 +141,16 @@ class HRService:
             final_base = f"{display_folder}_{doc_type}"
             # Có dấu
             dest = safe_destination(dest_person_dir, final_base, suffix)
+            
+            # Extract doc metadata before moving
+            meta_file = f.with_suffix(f.suffix + ".meta.json")
+            doc_meta = {}
+            if meta_file.exists():
+                try:
+                    doc_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
             move_to_output(f, dest)
             moved.append(
                 {
@@ -134,7 +164,17 @@ class HRService:
                 doc_type=doc_type,
                 filename=dest.name,
                 rel_path=str(dest.relative_to(self._settings.people_dir)),
+                issued_date=doc_meta.get("issued_date"),
+                issued_by=doc_meta.get("issued_by"),
+                start_date=doc_meta.get("start_date"),
+                end_date=doc_meta.get("end_date"),
+                document_number=doc_meta.get("document_number"),
             )
+
+        # Cleanup .meta.json files
+        for meta_file in list(src_dir.glob("*.meta.json")):
+            meta_file.unlink(missing_ok=True)
+
 
         # Remove empty staged folder if all files were moved.
         try:
@@ -176,16 +216,39 @@ class HRService:
         #         pass
         display_name = final_person
 
+        import json
+        emp_meta = {}
+        for filename in filenames:
+            if filename.endswith(".meta.json"):
+                continue
+            meta_path = src_dir / f"{filename}.meta.json"
+            if meta_path.exists():
+                try:
+                    data = json.loads(meta_path.read_text(encoding="utf-8"))
+                    for k, v in data.items():
+                        if v is not None and k not in ("person_name", "doc_type"):
+                            emp_meta[k] = v
+                except Exception:
+                    pass
+
         emp = upsert_employee(
             db,
-            employee_code=final_person_folder,
+            employee_code=emp_meta.get("employee_code") or final_person_folder,
             full_name=display_name,
             folder_path=str(dest_person_dir),
+            date_of_birth=emp_meta.get("date_of_birth"),
+            hometown=emp_meta.get("hometown"),
+            join_date=emp_meta.get("join_date"),
+            department=emp_meta.get("department"),
+            phone=emp_meta.get("phone"),
+            email=emp_meta.get("email"),
+            permanent_address=emp_meta.get("permanent_address"),
+            position=emp_meta.get("position"),
         )
 
         moved: list[dict] = []
         for filename in filenames:
-            if filename == _DISPLAY_NAME_FILE:
+            if filename == _DISPLAY_NAME_FILE or filename.endswith(".meta.json"):
                 continue
                 
             f = src_dir / filename
@@ -204,7 +267,19 @@ class HRService:
             final_base = f"{display_folder}_{doc_type}"
 
             dest = safe_destination(dest_person_dir, final_base, suffix)
+            
+            meta_file = f.with_suffix(f.suffix + ".meta.json")
+            doc_meta = {}
+            if meta_file.exists():
+                try:
+                    doc_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
             move_to_output(f, dest)
+            if meta_file.exists():
+                meta_file.unlink(missing_ok=True)
+                
             moved.append(
                 {
                     "from": str(f.relative_to(self._settings.output_dir)),
@@ -217,6 +292,11 @@ class HRService:
                 doc_type=doc_type,
                 filename=dest.name,
                 rel_path=str(dest.relative_to(self._settings.people_dir)),
+                issued_date=doc_meta.get("issued_date"),
+                issued_by=doc_meta.get("issued_by"),
+                start_date=doc_meta.get("start_date"),
+                end_date=doc_meta.get("end_date"),
+                document_number=doc_meta.get("document_number"),
             )
 
         # Remove empty staged folder if all files were moved.
@@ -326,6 +406,12 @@ class HRService:
                 
             dest = safe_destination(dest_dir, doc_type_str.upper(), file_path.suffix.lower())
             move_to_output(file_path, dest)
+            
+            try:
+                meta_path = dest.with_suffix(dest.suffix + ".meta.json")
+                meta_path.write_text(info.model_dump_json(), encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"Failed to write metadata for {dest.name}: {e}")
 
             logger.info("%s -> %s", file_path.name, dest.relative_to(output_dir))
             return FileProcessResult(
