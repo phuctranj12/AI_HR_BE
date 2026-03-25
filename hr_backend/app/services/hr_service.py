@@ -110,7 +110,7 @@ class HRService:
             doc_type = base.rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
 
             # Về sau cần format lại tên file có gì the fomart ở đây
-            final_base = f"{doc_type}_{person_folder}"
+            final_base = f"{person_folder}_{doc_type}"
 
             dest = safe_destination(dest_person_dir, final_base, suffix)
             move_to_output(f, dest)
