@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from hr_backend.app.models.document import DocType
+from app.models.document import DocType
 
 
 # ── Gemini analysis ──────────────────────────────────────────────────────────

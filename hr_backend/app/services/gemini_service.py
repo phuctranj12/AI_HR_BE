@@ -8,10 +8,10 @@ from pathlib import Path
 import google.generativeai as genai
 from google.generativeai import client as genai_client
 
-from hr_backend.app.core.config import Settings
-from hr_backend.app.core.exceptions import GeminiAnalysisError, UnsupportedFileTypeError
-from hr_backend.app.models.document import SUPPORTED_MIME_TYPES
-from hr_backend.app.schemas.hr import DocumentInfo
+from app.core.config import Settings
+from app.core.exceptions import GeminiAnalysisError, UnsupportedFileTypeError
+from app.models.document import SUPPORTED_MIME_TYPES
+from app.schemas.hr import DocumentInfo
 
 logger = logging.getLogger(__name__)
 
