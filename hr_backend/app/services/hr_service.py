@@ -25,6 +25,9 @@ _TMP_DIR = Path("_tmp_cccd")
 _DISPLAY_NAME_FILE = "_display_name.txt"
 
 
+def display_name_to_folder(name: str) -> str:
+    """Giữ nguyên dấu tiếng Việt, chỉ chuẩn hóa khoảng trắng → dấu gạch dưới."""
+    return "_".join(name.strip().split())
 class HRService:
     """Orchestrates document classification and face-matching workflows."""
 
@@ -32,6 +35,7 @@ class HRService:
         self._settings = settings
         self._gemini = GeminiService(settings)
         self._face = FaceService(settings)
+
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -109,9 +113,12 @@ class HRService:
             # base might be "CCCD" or "CCCD_2" etc. Strip trailing _N.
             doc_type = base.rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
 
-            # Về sau cần format lại tên file có gì the fomart ở đây
-            final_base = f"{person_folder}_{doc_type}"
-
+            # Về sau cần format lại tên file có gì the fomart ở đây (Không dấu )
+            # final_base = f"{person_folder}_{doc_type}"
+            # Có dấu
+            display_folder = display_name_to_folder(display_name)
+            final_base = f"{display_folder}_{doc_type}"
+            # Có dấu
             dest = safe_destination(dest_person_dir, final_base, suffix)
             move_to_output(f, dest)
             moved.append(
@@ -188,7 +195,13 @@ class HRService:
             base = f.stem
             doc_type = base.rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
 
-            final_base = f"{doc_type}_{final_person_folder}"
+            # cũ không dấu
+            # final_base = f"{doc_type}_{final_person_folder}"
+
+            # mới có dấu
+            display_folder = display_name_to_folder(display_name)
+            final_base = f"{display_folder}_{doc_type}"
+
             dest = safe_destination(dest_person_dir, final_base, suffix)
             move_to_output(f, dest)
             moved.append(
@@ -290,7 +303,10 @@ class HRService:
         try:
             # Create a Gemini client per worker thread for safer concurrency.
             info = GeminiService(self._settings).analyze_document(file_path)
-            folder_name = normalize_name(info.person_name) if info.person_name else UNKNOWN_FOLDER
+            # Tên không dấu
+            # folder_name = normalize_name(info.person_name) if info.person_name else UNKNOWN_FOLDER
+            # Tên có dấu
+            folder_name = display_name_to_folder(info.person_name) if info.person_name else UNKNOWN_FOLDER
             dest_dir = output_dir / folder_name
             dest_dir.mkdir(parents=True, exist_ok=True)
             # if info.person_name and folder_name != UNKNOWN_FOLDER:
