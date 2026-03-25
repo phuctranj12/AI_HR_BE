@@ -27,7 +27,7 @@ _DISPLAY_NAME_FILE = "_display_name.txt"
 
 def display_name_to_folder(name: str) -> str:
     """Giữ nguyên dấu tiếng Việt, chỉ chuẩn hóa khoảng trắng → dấu gạch dưới."""
-    return "_".join(name.strip().split())
+    return " ".join(name.strip().split())
 class HRService:
     """Orchestrates document classification and face-matching workflows."""
 
@@ -111,12 +111,13 @@ class HRService:
             suffix = f.suffix.lower()
             base = f.stem
             # base might be "CCCD" or "CCCD_2" etc. Strip trailing _N.
-            doc_type = base.rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
+            doc_type = base.upper().rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
 
             # Về sau cần format lại tên file có gì the fomart ở đây (Không dấu )
             # final_base = f"{person_folder}_{doc_type}"
             # Có dấu
             display_folder = display_name_to_folder(display_name)
+
             final_base = f"{display_folder}_{doc_type}"
             # Có dấu
             dest = safe_destination(dest_person_dir, final_base, suffix)
@@ -193,7 +194,7 @@ class HRService:
 
             suffix = f.suffix.lower()
             base = f.stem
-            doc_type = base.rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
+            doc_type = base.upper().rsplit("_", 1)[0] if base.rsplit("_", 1)[-1].isdigit() else base
 
             # cũ không dấu
             # final_base = f"{doc_type}_{final_person_folder}"
@@ -319,10 +320,11 @@ class HRService:
             # SAU (đúng)
             doc_type_str = info.doc_type.value if hasattr(info.doc_type, "value") else str(info.doc_type)
             # Remove class prefix if present (e.g. DocType.CCCD -> CCCD)
+            doc_type_str = doc_type_str.upper()
             if doc_type_str.startswith("DocType."):
                 doc_type_str = doc_type_str.replace("DocType.", "")
                 
-            dest = safe_destination(dest_dir, doc_type_str, file_path.suffix.lower())
+            dest = safe_destination(dest_dir, doc_type_str.upper(), file_path.suffix.lower())
             move_to_output(file_path, dest)
 
             logger.info("%s -> %s", file_path.name, dest.relative_to(output_dir))
