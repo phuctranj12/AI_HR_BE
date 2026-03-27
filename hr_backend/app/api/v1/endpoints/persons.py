@@ -120,7 +120,7 @@ def search_folders(body: SearchFolderRequest, settings: SettingsDep, db: DbDep) 
                     PersonFolder(
                         name=entry.name,
                         display_name=row["full_name"],
-                        files=sorted(f.name for f in entry.iterdir() if f.is_file()),
+                        files=sorted(f.name for f in entry.iterdir() if f.is_file() and not f.name.endswith(".meta.json") and f.name != "_display_name.txt"),
                     )
                 )
                 
@@ -191,6 +191,30 @@ def serve_person_file(person: str, filename: str, settings: SettingsDep) -> File
 
 
 @router.delete(
+    "/batch",
+    summary="Batch delete multiple persons folders",
+    status_code=status.HTTP_200_OK,
+)
+def delete_persons_batch(body: dict, settings: SettingsDep, db: DbDep) -> dict:
+    persons = body.get("persons", [])
+    if not isinstance(persons, list):
+        raise HTTPException(status_code=422, detail="'persons' array is required")
+        
+    results = []
+    for person in persons:
+        try:
+            folder = settings.people_dir / person
+            hard_deleted = delete_employee_and_documents(db, person, hard_delete=True)
+            if folder.exists() and folder.is_dir():
+                shutil.rmtree(folder)
+            results.append({"person": person, "success": True})
+        except Exception as exc:
+            results.append({"person": person, "success": False, "error": str(exc)})
+            
+    return {"results": results}
+
+
+@router.delete(
     "/{person}",
     summary="Delete an entire person's folder from people storage",
     status_code=status.HTTP_200_OK,
@@ -204,12 +228,33 @@ def delete_person_data(person: str, settings: SettingsDep, db: DbDep) -> dict:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
             
     try:
-        hard_deleted = delete_employee_and_documents(db, person)
-        if hard_deleted and folder.exists() and folder.is_dir():
+        # Force hard-delete on DB records to revert the soft-delete lock feature
+        hard_deleted = delete_employee_and_documents(db, person, hard_delete=True)
+        # Always clean up the physical storage folder when calling Delete
+        if folder.exists() and folder.is_dir():
             shutil.rmtree(folder)
         return {"deleted": person, "hard_deleted": hard_deleted}
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.post(
+    "/delete-batch",
+    summary="Batch soft-delete multiple employee records from DB and output",
+    status_code=status.HTTP_200_OK,
+)
+def batch_delete_employee_data(body: dict, db: DbDep) -> dict:
+    persons = body.get("persons", [])
+    if not isinstance(persons, list):
+        raise HTTPException(status_code=422, detail="'persons' must be a list of strings")
+    results = []
+    for person in persons:
+        try:
+            d = delete_employee_and_documents(db, person)
+            results.append({"person": person, "success": d})
+        except Exception as exc:
+            results.append({"person": person, "success": False, "error": str(exc)})
+    return {"results": results}
 
 
 @router.patch(

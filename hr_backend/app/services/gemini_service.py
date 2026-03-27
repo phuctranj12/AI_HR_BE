@@ -53,7 +53,7 @@ Nếu file chứa NHIỀU hồ sơ của NHIỀU người, chỉ lấy hồ sơ 
 {
   "person_name": "Tên đầy đủ tiếng Việt có dấu. VD: Nguyễn Văn A",
   "doc_type": "Một trong những loại hồ sơ hợp lệ. VD: Căn cước công dân",
-  "employee_code": "Mã nhân viên, mã thẻ, hoặc số CCCD/CMND nếu là thẻ căn cước",
+  "employee_code": "Mã nhân viên (MNV), TUYỆT ĐỐI không lấy số CCCD/CMND. Chỉ điền nếu tài liệu ghi rõ là Mã nhân viên/Employee ID, nếu không có để null",
   "date_of_birth": "Ngày sinh (Định dạng YYYY-MM-DD)",
   "hometown": "Quê quán hoặc nơi sinh",
   "join_date": "Ngày bắt đầu làm việc/thử việc (Định dạng YYYY-MM-DD)",

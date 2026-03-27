@@ -3,7 +3,8 @@ import logging
 import shutil
 import concurrent.futures
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+import json
 
 from app.core.config import Settings
 from app.models.document import SUPPORTED_MIME_TYPES, UNKNOWN_FOLDER
@@ -17,7 +18,7 @@ from app.services.face_service import FaceService
 from app.services.gemini_service import GeminiService
 from app.utils.file_utils import copy_to_output, move_to_output, safe_destination
 from app.utils.name_normalizer import normalize_name
-from app.db.postgres import insert_document, upsert_employee
+from app.db.postgres import insert_document, find_and_update_employee
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,29 @@ _DISPLAY_NAME_FILE = "_display_name.txt"
 def display_name_to_folder(name: str) -> str:
     """Giữ nguyên dấu tiếng Việt, chỉ chuẩn hóa khoảng trắng → dấu gạch dưới."""
     return " ".join(name.strip().split())
+
+def parse_vn_date_to_iso(date_str: Any) -> Optional[str]:
+    """Parse dd/MM/yyyy to YYYY-MM-DD for PostgreSQL safely."""
+    if not date_str or not isinstance(date_str, str):
+        return None
+    val = date_str.strip()
+    if not val:
+        return None
+    try:
+        if "/" in val or "-" in val:
+            val = val.replace("-", "/")
+            parts = val.split("/")
+            if len(parts) == 3:
+                if len(parts[2]) == 4: # dd/mm/yyyy
+                    d, m, y = map(int, parts)
+                    return f"{y:04d}-{m:02d}-{d:02d}"
+                elif len(parts[0]) == 4: # yyyy/mm/dd
+                    y, m, d = map(int, parts)
+                    return f"{y:04d}-{m:02d}-{d:02d}"
+    except Exception:
+        pass
+    return val
+
 class HRService:
     """Orchestrates document classification and face-matching workflows."""
 
@@ -87,44 +111,47 @@ class HRService:
         if not src_dir.exists() or not src_dir.is_dir():
             raise FileNotFoundError(f"Person folder not found in output: {person}")
 
+        # Start with a fallback generated folder path
         dest_person_dir = self._settings.people_dir / person_folder
-        dest_person_dir.mkdir(parents=True, exist_ok=True)
 
         display_name = person
-        # meta_path = src_dir / _DISPLAY_NAME_FILE
-        # try:
-        #     if meta_path.exists():
-        #         display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
-        #         meta_path.unlink()
-        # except Exception:
-        #     pass
+        meta_path = src_dir / _DISPLAY_NAME_FILE
+        try:
+            if meta_path.exists():
+                display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
+                meta_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
-        import json
-        emp_meta = {}
+        emp_meta: dict[str, Any] = {}
         for f in src_dir.iterdir():
             if f.is_file() and f.name.endswith(".meta.json"):
                 try:
                     data = json.loads(f.read_text(encoding="utf-8"))
                     for k, v in data.items():
-                        if v is not None and k not in ("person_name", "doc_type"):
-                            emp_meta[k] = v
+                        if v is not None and str(k) not in ("person_name", "doc_type"):
+                            emp_meta[str(k)] = v
                 except Exception:
                     pass
 
-        emp = upsert_employee(
+        emp = find_and_update_employee(
             db,
-            employee_code=emp_meta.get("employee_code") or person_folder,
+            employee_code=emp_meta.get("employee_code"),
+            cccd_number=emp_meta.get("document_number"),
             full_name=display_name,
             folder_path=str(dest_person_dir),
-            date_of_birth=emp_meta.get("date_of_birth"),
+            date_of_birth=parse_vn_date_to_iso(emp_meta.get("date_of_birth")),
             hometown=emp_meta.get("hometown"),
-            join_date=emp_meta.get("join_date"),
+            join_date=parse_vn_date_to_iso(emp_meta.get("join_date")),
             department=emp_meta.get("department"),
             phone=emp_meta.get("phone"),
             email=emp_meta.get("email"),
             permanent_address=emp_meta.get("permanent_address"),
             position=emp_meta.get("position"),
         )
+        # Override destination to the resolved pre-existing or new DB folder path
+        dest_person_dir = Path(emp.folder_path)
+        dest_person_dir.mkdir(parents=True, exist_ok=True)
 
         moved: list[dict] = []
         for f in sorted(p for p in src_dir.iterdir() if p.is_file() and not p.name.endswith(".meta.json") and p.name != _DISPLAY_NAME_FILE):
@@ -164,10 +191,10 @@ class HRService:
                 doc_type=doc_type,
                 filename=dest.name,
                 rel_path=str(dest.relative_to(self._settings.people_dir)),
-                issued_date=doc_meta.get("issued_date"),
+                issued_date=parse_vn_date_to_iso(doc_meta.get("issued_date")),
                 issued_by=doc_meta.get("issued_by"),
-                start_date=doc_meta.get("start_date"),
-                end_date=doc_meta.get("end_date"),
+                start_date=parse_vn_date_to_iso(doc_meta.get("start_date")),
+                end_date=parse_vn_date_to_iso(doc_meta.get("end_date")),
                 document_number=doc_meta.get("document_number"),
             )
 
@@ -178,8 +205,11 @@ class HRService:
 
         # Remove empty staged folder if all files were moved.
         try:
-            if src_dir.exists() and not any(src_dir.iterdir()):
-                src_dir.rmdir()
+            if src_dir.exists():
+                (src_dir / ".DS_Store").unlink(missing_ok=True)
+                (src_dir / _DISPLAY_NAME_FILE).unlink(missing_ok=True)
+                if not any(src_dir.iterdir()):
+                    src_dir.rmdir()
         except Exception:
             pass
 
@@ -203,21 +233,17 @@ class HRService:
         final_person = target_person if target_person else source_person
         final_person_folder = normalize_name(final_person)
         dest_person_dir = self._settings.people_dir / final_person_folder
-        dest_person_dir.mkdir(parents=True, exist_ok=True)
-
+        
         display_name = final_person
-        # if final_person == source_person:
-        #     meta_path = src_dir / _DISPLAY_NAME_FILE
-        #     try:
-        #         if meta_path.exists():
-        #             display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
-        #             meta_path.unlink()
-        #     except Exception:
-        #         pass
-        display_name = final_person
+        meta_path = src_dir / _DISPLAY_NAME_FILE
+        try:
+            if meta_path.exists():
+                display_name = meta_path.read_text(encoding="utf-8").strip() or display_name
+                meta_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
-        import json
-        emp_meta = {}
+        emp_meta: dict[str, Any] = {}
         for filename in filenames:
             if filename.endswith(".meta.json"):
                 continue
@@ -226,25 +252,28 @@ class HRService:
                 try:
                     data = json.loads(meta_path.read_text(encoding="utf-8"))
                     for k, v in data.items():
-                        if v is not None and k not in ("person_name", "doc_type"):
-                            emp_meta[k] = v
+                        if v is not None and str(k) not in ("person_name", "doc_type"):
+                            emp_meta[str(k)] = v
                 except Exception:
                     pass
 
-        emp = upsert_employee(
+        emp = find_and_update_employee(
             db,
-            employee_code=emp_meta.get("employee_code") or final_person_folder,
+            employee_code=emp_meta.get("employee_code"),
+            cccd_number=emp_meta.get("document_number"),
             full_name=display_name,
             folder_path=str(dest_person_dir),
-            date_of_birth=emp_meta.get("date_of_birth"),
+            date_of_birth=parse_vn_date_to_iso(emp_meta.get("date_of_birth")),
             hometown=emp_meta.get("hometown"),
-            join_date=emp_meta.get("join_date"),
+            join_date=parse_vn_date_to_iso(emp_meta.get("join_date")),
             department=emp_meta.get("department"),
             phone=emp_meta.get("phone"),
             email=emp_meta.get("email"),
             permanent_address=emp_meta.get("permanent_address"),
             position=emp_meta.get("position"),
         )
+        dest_person_dir = Path(emp.folder_path)
+        dest_person_dir.mkdir(parents=True, exist_ok=True)
 
         moved: list[dict] = []
         for filename in filenames:
@@ -292,17 +321,20 @@ class HRService:
                 doc_type=doc_type,
                 filename=dest.name,
                 rel_path=str(dest.relative_to(self._settings.people_dir)),
-                issued_date=doc_meta.get("issued_date"),
+                issued_date=parse_vn_date_to_iso(doc_meta.get("issued_date")),
                 issued_by=doc_meta.get("issued_by"),
-                start_date=doc_meta.get("start_date"),
-                end_date=doc_meta.get("end_date"),
+                start_date=parse_vn_date_to_iso(doc_meta.get("start_date")),
+                end_date=parse_vn_date_to_iso(doc_meta.get("end_date")),
                 document_number=doc_meta.get("document_number"),
             )
 
         # Remove empty staged folder if all files were moved.
         try:
-            if src_dir.exists() and not any(src_dir.iterdir()):
-                src_dir.rmdir()
+            if src_dir.exists():
+                (src_dir / ".DS_Store").unlink(missing_ok=True)
+                (src_dir / _DISPLAY_NAME_FILE).unlink(missing_ok=True)
+                if not any(src_dir.iterdir()):
+                    src_dir.rmdir()
         except Exception:
             pass
 
@@ -385,16 +417,24 @@ class HRService:
             # Create a Gemini client per worker thread for safer concurrency.
             info = GeminiService(self._settings).analyze_document(file_path)
             # Tên không dấu
-            # folder_name = normalize_name(info.person_name) if info.person_name else UNKNOWN_FOLDER
             # Tên có dấu
             folder_name = display_name_to_folder(info.person_name) if info.person_name else UNKNOWN_FOLDER
+            
+            if folder_name != UNKNOWN_FOLDER:
+                normalized_target = normalize_name(info.person_name)
+                for existing_dir in output_dir.iterdir():
+                    if existing_dir.is_dir() and existing_dir.name != UNKNOWN_FOLDER:
+                        if normalize_name(existing_dir.name) == normalized_target:
+                            folder_name = existing_dir.name
+                            break
+
             dest_dir = output_dir / folder_name
             dest_dir.mkdir(parents=True, exist_ok=True)
-            # if info.person_name and folder_name != UNKNOWN_FOLDER:
-            #     try:
-            #         (dest_dir / _DISPLAY_NAME_FILE).write_text(info.person_name, encoding="utf-8")
-            #     except Exception:
-            #         pass
+            if info.person_name and folder_name != UNKNOWN_FOLDER:
+                try:
+                    (dest_dir / _DISPLAY_NAME_FILE).write_text(info.person_name, encoding="utf-8")
+                except Exception:
+                    pass
 
             # dest = safe_destination(dest_dir, info.doc_type, file_path.suffix.lower())
             # SAU (đúng)

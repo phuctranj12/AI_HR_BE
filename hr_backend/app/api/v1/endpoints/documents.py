@@ -2,6 +2,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import urllib.parse
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
@@ -71,6 +72,48 @@ async def process_documents(hr: HRServiceDep) -> ProcessDocumentsResponse:
 
 
 @router.post(
+    "/upload-and-process",
+    summary="Upload and immediately process a single document",
+)
+async def upload_and_process(
+    file: UploadFile,
+    settings: SettingsDep,
+    hr: HRServiceDep,
+) -> dict:
+    import uuid
+    import asyncio
+    
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in SUPPORTED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format: {suffix}"
+        )
+        
+    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+    dest = settings.input_dir / safe_name
+    
+    try:
+        content = await file.read()
+        dest.write_bytes(content)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save temporary file: {exc}"
+        ) from exc
+
+    try:
+        result = await asyncio.to_thread(hr._process_single_document, dest, settings.output_dir)
+        # Convert FileProcessResult pydantic model to dict
+        return result.model_dump()
+    except Exception as exc:
+        if dest.exists():
+            dest.unlink(missing_ok=True)
+        logger.exception("upload_and_process failed")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.post(
     "/output/{person}/commit",
     summary="Commit a person's staged output to PEOPLE_DIR (create folder if missing)",
     status_code=status.HTTP_200_OK,
@@ -119,6 +162,27 @@ def commit_all(hr: HRServiceDep, db: DbDep) -> dict:
         logger.exception("commit_all failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
+
+@router.post(
+    "/output/batch-commit",
+    summary="Commit specific persons' staged output to PEOPLE_DIR",
+    status_code=status.HTTP_200_OK,
+)
+def commit_batch_persons(body: dict, hr: HRServiceDep, db: DbDep) -> dict:
+    persons = body.get("persons", [])
+    if not isinstance(persons, list):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A list of 'persons' is required")
+        
+    results = []
+    for person in persons:
+        try:
+            res = hr.commit_person(person=person, db=db)
+            results.append({"person": person, "success": True, "details": res})
+        except Exception as exc:
+            results.append({"person": person, "success": False, "error": str(exc)})
+            
+    return {"results": results}
+
 @router.delete(
     "/input",
     summary="Clear all files from the input directory",
@@ -160,7 +224,7 @@ def list_output(settings: SettingsDep) -> OutputListResponse:
                     PersonFolder(
                         name=entry.name,
                         display_name=display_name,
-                        files=sorted(f.name for f in entry.iterdir() if f.is_file()),
+                        files=sorted(f.name for f in entry.iterdir() if f.is_file() and not f.name.endswith(".meta.json") and f.name != "_display_name.txt"),
                     )
                 )
         return OutputListResponse(persons=persons)
@@ -188,11 +252,11 @@ def serve_output_file(person: str, filename: str, settings: SettingsDep) -> File
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     media_type = _MIME_MAP.get(file_path.suffix.lower(), "application/octet-stream")
+    encoded_filename = urllib.parse.quote(filename)
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
-        filename=filename,
-        headers={"Content-Disposition": f"inline; filename=\"{filename}\""},
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"},
     )
 
 
@@ -203,8 +267,15 @@ def serve_output_file(person: str, filename: str, settings: SettingsDep) -> File
 )
 def clear_output(settings: SettingsDep) -> dict:
     try:
-        shutil.rmtree(settings.output_dir, ignore_errors=True)
-        settings.output_dir.mkdir(parents=True, exist_ok=True)
+        if settings.output_dir.exists():
+            for p in settings.output_dir.iterdir():
+                try:
+                    if p.is_dir():
+                        shutil.rmtree(p, ignore_errors=True)
+                    elif p.is_file():
+                        p.unlink(missing_ok=True)
+                except Exception:
+                    pass
         return {"detail": "Output directory cleared."}
     except OSError as exc:
         raise HTTPException(
@@ -230,8 +301,11 @@ def delete_output_file(person: str, filename: str, settings: SettingsDep) -> dic
         file_path.unlink()
         # Remove person folder if now empty
         folder = settings.output_dir / person
-        if folder.exists() and not any(folder.iterdir()):
-            folder.rmdir()
+        if folder.exists():
+            (folder / ".DS_Store").unlink(missing_ok=True)
+            (folder / "_display_name.txt").unlink(missing_ok=True)
+            if not any(folder.iterdir()):
+                folder.rmdir()
         return {"deleted": filename}
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
@@ -397,6 +471,29 @@ def delete_person(person: str, settings: SettingsDep) -> dict:
         return {"deleted": person}
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/output/batch",
+    summary="Batch delete multiple staged persons from output",
+    status_code=status.HTTP_200_OK,
+)
+def delete_output_batch(body: dict, settings: SettingsDep) -> dict:
+    persons = body.get("persons", [])
+    if not isinstance(persons, list):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A list of 'persons' is required")
+        
+    results = []
+    for person in persons:
+        try:
+            out_dir = settings.output_dir / person
+            if out_dir.exists() and out_dir.is_dir():
+                shutil.rmtree(out_dir)
+            results.append({"person": person, "success": True})
+        except Exception as exc:
+            results.append({"person": person, "success": False, "error": str(exc)})
+            
+    return {"results": results}
 
 
 @router.patch(

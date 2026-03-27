@@ -32,6 +32,7 @@ def init_schema(conn) -> None:
                 id SERIAL PRIMARY KEY,
                 full_name TEXT NOT NULL,
                 employee_code TEXT UNIQUE,
+                cccd_number TEXT UNIQUE,
                 date_of_birth DATE,
                 hometown TEXT,
                 join_date DATE,

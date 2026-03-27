@@ -3,6 +3,7 @@ from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 from dataclasses import dataclass
 from typing import Optional
+from pathlib import Path
 
 from app.db.postgres_schema import init_schema
 from app.db.postgres_bootstrap import ensure_database_exists
@@ -11,6 +12,7 @@ from app.db.postgres_bootstrap import ensure_database_exists
 class Employee:
     id: int
     employee_code: Optional[str]
+    cccd_number: Optional[str]
     full_name: str
     folder_path: str
     created_at: str
@@ -50,7 +52,7 @@ def get_employee_by_code(conn, employee_code: str) -> Optional[Employee]:
         cur.execute(
             """
             SELECT 
-                id, employee_code, full_name, folder_path, created_at, updated_at, status_id,
+                id, employee_code, cccd_number, full_name, folder_path, created_at, updated_at, status_id,
                 date_of_birth::text, hometown, join_date::text, department, phone, email, 
                 permanent_address, position, file_path, notes
             FROM employees WHERE employee_code = %s
@@ -60,10 +62,28 @@ def get_employee_by_code(conn, employee_code: str) -> Optional[Employee]:
         row = cur.fetchone()
         return Employee(**row) if row else None
 
-def upsert_employee(
+def get_employee_by_folder(conn, folder_path: str) -> Optional[Employee]:
+    if not folder_path:
+        return None
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT 
+                id, employee_code, cccd_number, full_name, folder_path, created_at, updated_at, status_id,
+                date_of_birth::text, hometown, join_date::text, department, phone, email, 
+                permanent_address, position, file_path, notes
+            FROM employees WHERE folder_path = %s
+            """,
+            (folder_path,),
+        )
+        row = cur.fetchone()
+        return Employee(**row) if row else None
+
+def find_and_update_employee(
     conn,
     *,
-    employee_code: str,
+    employee_code: Optional[str] = None,
+    cccd_number: Optional[str] = None,
     full_name: str,
     folder_path: str,
     date_of_birth: Optional[str] = None,
@@ -75,21 +95,91 @@ def upsert_employee(
     permanent_address: Optional[str] = None,
     position: Optional[str] = None,
 ) -> Employee:
-    # Get active status ID
+    """Implement 4-tier deduplication matching cascade and route to found user."""
     active_id = get_status_id_by_name(conn, 'Active')
     
     with conn.cursor() as cur:
+        emp_id = None
+        
+        # Priority 1: employee_code
+        if employee_code and str(employee_code).strip():
+            cur.execute("SELECT id FROM employees WHERE employee_code = %s", (employee_code,))
+            row = cur.fetchone()
+            if row: emp_id = row[0]
+            
+        # Priority 2: cccd_number
+        if not emp_id and cccd_number and str(cccd_number).strip():
+            cur.execute("SELECT id FROM employees WHERE cccd_number = %s", (cccd_number,))
+            row = cur.fetchone()
+            if row: emp_id = row[0]
+            
+        # Priority 3: full_name + date_of_birth
+        if not emp_id and date_of_birth and str(date_of_birth).strip():
+            cur.execute("SELECT id FROM employees WHERE full_name ILIKE %s AND date_of_birth = %s", (full_name, date_of_birth))
+            row = cur.fetchone()
+            if row: emp_id = row[0]
+            
+        # Priority 4: exact full_name (if no reliable discriminators existed to check)
+        if not emp_id:
+            cur.execute("SELECT id FROM employees WHERE full_name ILIKE %s", (full_name,))
+            rows = cur.fetchall()
+            if len(rows) == 1:
+                emp_id = rows[0][0]
+
+        # Priority 5 (Fallback for generic web-app edits that just refer by active folder)
+        if not emp_id and folder_path:
+            cur.execute("SELECT id FROM employees WHERE folder_path = %s", (folder_path,))
+            row = cur.fetchone()
+            if row: emp_id = row[0]
+
+        if emp_id:
+            # UPDATE ALREADY EXISTING EMPLOYEE
+            cur.execute(
+                """
+                UPDATE employees SET
+                  employee_code = COALESCE(%s, employee_code),
+                  cccd_number = COALESCE(%s, cccd_number),
+                  full_name = COALESCE(%s, full_name),
+                  folder_path = COALESCE(NULLIF(TRIM(folder_path), ''), %s),
+                  status_id = COALESCE(status_id, %s),
+                  date_of_birth = COALESCE(%s, date_of_birth),
+                  hometown = COALESCE(%s, hometown),
+                  join_date = COALESCE(%s, join_date),
+                  department = COALESCE(%s, department),
+                  phone = COALESCE(%s, phone),
+                  email = COALESCE(%s, email),
+                  permanent_address = COALESCE(%s, permanent_address),
+                  position = COALESCE(%s, position),
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                RETURNING folder_path
+                """,
+                (
+                    employee_code, cccd_number, full_name, folder_path, active_id,
+                    date_of_birth, hometown, join_date, department,
+                    phone, email, permanent_address, position, emp_id
+                )
+            )
+            final_folder = cur.fetchone()[0]
+            conn.commit()
+            emp = get_employee_by_folder(conn, final_folder)
+            if emp is None:
+                raise RuntimeError(f"Could not retrieve updated employee for folder {final_folder}")
+            return emp
+
+        # INSERT NEW EMPLOYEE
         cur.execute(
             """
             INSERT INTO employees (
-                employee_code, full_name, folder_path, status_id,
+                employee_code, cccd_number, full_name, folder_path, status_id,
                 date_of_birth, hometown, join_date, department,
                 phone, email, permanent_address, position
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (employee_code) DO UPDATE SET
               full_name = COALESCE(EXCLUDED.full_name, employees.full_name),
-              folder_path = EXCLUDED.folder_path,
+              cccd_number = COALESCE(EXCLUDED.cccd_number, employees.cccd_number),
+              folder_path = COALESCE(NULLIF(TRIM(employees.folder_path), ''), EXCLUDED.folder_path),
               status_id = EXCLUDED.status_id,
               date_of_birth = COALESCE(EXCLUDED.date_of_birth, employees.date_of_birth),
               hometown = COALESCE(EXCLUDED.hometown, employees.hometown),
@@ -98,17 +188,21 @@ def upsert_employee(
               phone = COALESCE(EXCLUDED.phone, employees.phone),
               email = COALESCE(EXCLUDED.email, employees.email),
               permanent_address = COALESCE(EXCLUDED.permanent_address, employees.permanent_address),
-              position = COALESCE(EXCLUDED.position, employees.position)
+              position = COALESCE(EXCLUDED.position, employees.position),
+              updated_at = CURRENT_TIMESTAMP
+            RETURNING folder_path
             """,
             (
-                employee_code, full_name, folder_path, active_id,
+                employee_code, cccd_number, full_name, folder_path, active_id,
                 date_of_birth, hometown, join_date, department,
                 phone, email, permanent_address, position
             ),
         )
+        final_folder = cur.fetchone()[0]
     conn.commit()
-    emp = get_employee_by_code(conn, employee_code)
-    assert emp is not None
+    emp = get_employee_by_folder(conn, final_folder)
+    if emp is None:
+        raise RuntimeError(f"Could not retrieve inserted employee for folder {final_folder}")
     return emp
 
 def insert_document(
@@ -180,26 +274,32 @@ def rename_employee_documents_folder(conn, employee_id: int, old_folder: str, ne
     conn.commit()
 
 def delete_employee_and_documents(conn, normalized_name: str, hard_delete: bool = False) -> bool:
-    emp = get_employee_by_code(conn, normalized_name)
-    if not emp:
-        return False
-        
     terminated_id = get_status_id_by_name(conn, 'Terminated')
     
     with conn.cursor() as cur:
-        cur.execute("SELECT status_id FROM employees WHERE id = %s", (emp.id,))
-        row = cur.fetchone()
-        current_status_id = row[0] if row else None
+        # Match all employees pointing to this physical folder to clean up any legacy duplicates
+        cur.execute("SELECT id, status_id FROM employees WHERE folder_path LIKE %s", ('%/' + normalized_name,))
+        rows = cur.fetchall()
         
-        if current_status_id != terminated_id and not hard_delete:
-            cur.execute("UPDATE employees SET status_id = %s WHERE id = %s", (terminated_id, emp.id))
-            conn.commit()
-            return False
+    if not rows:
+        return False
+        
+    deleted_any = False
+    with conn.cursor() as cur:
+        for row in rows:
+            emp_id = row[0]
+            current_status_id = row[1]
             
-        cur.execute("DELETE FROM project_employees WHERE employee_id = %s", (emp.id,))
-        cur.execute("DELETE FROM documents WHERE employee_id = %s", (emp.id,))
-        cur.execute("DELETE FROM employees WHERE id = %s", (emp.id,))
-    conn.commit()
+            if current_status_id != terminated_id and not hard_delete:
+                cur.execute("UPDATE employees SET status_id = %s WHERE id = %s", (terminated_id, emp_id))
+            else:
+                cur.execute("DELETE FROM project_employees WHERE employee_id = %s", (emp_id,))
+                cur.execute("DELETE FROM documents WHERE employee_id = %s", (emp_id,))
+                cur.execute("DELETE FROM employees WHERE id = %s", (emp_id,))
+                deleted_any = True
+                
+        conn.commit()
+    
     return True
 
 def clear_all_data(conn) -> None:
